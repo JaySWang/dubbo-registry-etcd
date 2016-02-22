@@ -1,22 +1,7 @@
-/*
- * Copyright 1999-2011 Alibaba Group.
- *  
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *  
- *      http://www.apache.org/licenses/LICENSE-2.0
- *  
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+
 package com.alibaba.dubbo.registry.etcd;
 
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -37,47 +22,32 @@ import com.justinsb.etcd.EtcdClient;
 import com.justinsb.etcd.EtcdClientException;
 
 /**
- * ZookeeperRegistry
+ * EtcdRegistry
  * 
- * @author william.liangf
- */
+ * @author dyson.wang
+ * */
 public class EtcdRegistry extends FailbackRegistry {
 
-
-    private final static int DEFAULT_ETCD_PORT = 4001;
-    
     private final static String DEFAULT_ROOT = "dubbo";
-
-    private final String        root;
-
-    
+    private final String root;
+    private final static Logger logger = LoggerFactory.getLogger(EtcdRegistry.class);
     private final Set<String> anyServices = new ConcurrentHashSet<String>();
-
     private final ConcurrentMap<URL, ConcurrentMap<NotifyListener, ChildListener>> etcdListeners = new ConcurrentHashMap<URL, ConcurrentMap<NotifyListener, ChildListener>>();
-
     private  EtcdClient etcdClient;
     
     public EtcdRegistry(URL url) {
     	super(url);
-		System.out.println("EtcdRegistry");
-
+		logger.debug("EtcdRegistry");
         String group = url.getParameter(Constants.GROUP_KEY, DEFAULT_ROOT);
         if (! group.startsWith(Constants.PATH_SEPARATOR)) {
             group = Constants.PATH_SEPARATOR + group;
         }
         this.root = group;
-		
-		
-		
 		String protocol = "http://";
-			String host = url.getHost();
-			int port = url.getPort();
-			 String etcdServerURL = protocol+host+":"+port+"/";
-			etcdClient = new EtcdClient(URI.create(etcdServerURL));
-			System.out.println("connect to etcd");
-	
-    	
-    	
+		String host = url.getHost();
+		int port = url.getPort();
+		String etcdServerURL = protocol+host+":"+port+"/";
+		etcdClient = new EtcdClient(URI.create(etcdServerURL));
     }
 
 	public boolean isAvailable() {
@@ -87,21 +57,12 @@ public class EtcdRegistry extends FailbackRegistry {
 
 	@Override
 	protected void doRegister(URL url) {
-		System.out.println("doRegister: "+url);
+		logger.debug("doRegister: "+url);
 		try {
-			//dubbo://10.59.184.73:20880/com.alibaba.dubbo.demo.DemoService?anyhost=true&application=demo-provider&dubbo=2.0.0&generic=false&interface=com.alibaba.dubbo.demo.DemoService&loadbalance=roundrobin&methods=sayHello&owner=william&pid=10372&side=provider&timestamp=1455776517270
-
-			///dubbo/com.alibaba.dubbo.demo.DemoService/providers/dubbo%3A%2F%2F10.59.184.73%3A20880%2Fcom.alibaba.dubbo.demo.DemoService%3Fanyhost%3Dtrue%26application%3Ddemo-provider%26dubbo%3D2.0.0%26generic%3Dfalse%26interface%3Dcom.alibaba.dubbo.demo.DemoService%26loadbalance%3Droundrobin%26methods%3DsayHello%26owner%3Dwilliam%26pid%3D10952%26side%3Dprovider%26timestamp%3D1455776452075
-		//	/dubbo/com.alibaba.dubbo.demo.DemoService/providers
-			// curl -L http://127.0.0.1:4001/v2/keys/dubbo -XPUT-d dir=true
-
-			etcdClient.create(toUrlPath(url),false);
-			
+			etcdClient.create(toUrlPath(url),false);			
 		} catch (EtcdClientException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
-		
 	}
 	
 	private String toUrlPath(URL url) {
@@ -119,7 +80,6 @@ public class EtcdRegistry extends FailbackRegistry {
         }
         return toRootDir() + URL.encode(name);
     }
-
     
     private String toRootDir() {
         if (root.equals(Constants.PATH_SEPARATOR)) {
@@ -193,8 +153,7 @@ public class EtcdRegistry extends FailbackRegistry {
                         zkListener = listeners.get(listener);
                     }
                     etcdClient.create(path, true);
-                    List<String> children = etcdClient.getChildren(path);
-                //    List<String> children = etcdClient.addChildListener(path, zkListener);
+                   List<String> children = etcdClient.addChildListener(path, zkListener);
                     if (children != null) {
                     	urls.addAll(toUrlsWithEmpty(url, path, children));
                     }
@@ -204,14 +163,13 @@ public class EtcdRegistry extends FailbackRegistry {
         } catch (Throwable e) {
             throw new RpcException("Failed to subscribe " + url + " to etcd " + getUrl() + ", cause: " + e.getMessage(), e);
         }
-		
 	}
 
 	@Override
 	protected void doUnsubscribe(URL url, NotifyListener listener) {
 		System.out.println("doUnsubscribe: "+url+" "+listener);
-		
 	}
+	
     private List<URL> toUrlsWithEmpty(URL consumer, String path, List<String> providers) {
         List<URL> urls = toUrlsWithoutEmpty(consumer, providers);
         if (urls == null || urls.isEmpty()) {
@@ -253,5 +211,4 @@ public class EtcdRegistry extends FailbackRegistry {
 	        }
 	        return paths;
 	    }
-
 }
