@@ -1,7 +1,6 @@
 
 package com.alibaba.dubbo.registry.etcd;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -17,9 +16,12 @@ import com.alibaba.dubbo.common.utils.UrlUtils;
 import com.alibaba.dubbo.registry.NotifyListener;
 import com.alibaba.dubbo.registry.support.FailbackRegistry;
 import com.alibaba.dubbo.remoting.etcd.ChildListener;
+import com.alibaba.dubbo.remoting.etcd.EtcdClient;
+import com.alibaba.dubbo.remoting.etcd.EtcdV3Client;
 import com.alibaba.dubbo.rpc.RpcException;
-import com.justinsb.etcd.EtcdClient;
-import com.justinsb.etcd.EtcdClientException;
+
+import com.sap.etcd.adaptor.EtcdClientAdaptor;
+import com.sap.etcd.adaptor.WatchListener;
 
 /**
  * EtcdRegistry
@@ -32,7 +34,7 @@ public class EtcdRegistry extends FailbackRegistry {
     private final String root;
     private final static Logger logger = LoggerFactory.getLogger(EtcdRegistry.class);
     private final Set<String> anyServices = new ConcurrentHashSet<String>();
-    private final ConcurrentMap<URL, ConcurrentMap<NotifyListener, ChildListener>> etcdListeners = new ConcurrentHashMap<URL, ConcurrentMap<NotifyListener, ChildListener>>();
+    private final ConcurrentMap<URL, ConcurrentMap<NotifyListener, ChildListener>> serviceListeners = new ConcurrentHashMap<URL, ConcurrentMap<NotifyListener, ChildListener>>();
     private  EtcdClient etcdClient;
     
     public EtcdRegistry(URL url) {
@@ -43,26 +45,20 @@ public class EtcdRegistry extends FailbackRegistry {
             group = Constants.PATH_SEPARATOR + group;
         }
         this.root = group;
-		String protocol = "http://";
 		String host = url.getHost();
 		int port = url.getPort();
-		String etcdServerURL = protocol+host+":"+port+"/";
-		etcdClient = new EtcdClient(URI.create(etcdServerURL));
+		etcdClient = new EtcdV3Client(host,port);
     }
 
 	public boolean isAvailable() {
 		System.out.println("isAvailable");
-		return false;
+		return true;
 	}
 
 	@Override
 	protected void doRegister(URL url) {
 		logger.debug("doRegister: "+url);
-		try {
 			etcdClient.create(toUrlPath(url),false);			
-		} catch (EtcdClientException e) {
-			e.printStackTrace();
-		}
 	}
 	
 	private String toUrlPath(URL url) {
@@ -103,57 +99,26 @@ public class EtcdRegistry extends FailbackRegistry {
 	protected void doSubscribe(final URL url, final NotifyListener listener) {
 	    try {
             if (Constants.ANY_VALUE.equals(url.getServiceInterface())) {
-                String root = toRootPath();
-                ConcurrentMap<NotifyListener, ChildListener> listeners = etcdListeners.get(url);
-                if (listeners == null) {
-                    etcdListeners.putIfAbsent(url, new ConcurrentHashMap<NotifyListener, ChildListener>());
-                    listeners = etcdListeners.get(url);
-                }
-                ChildListener zkListener = listeners.get(listener);
-                if (zkListener == null) {
-                    listeners.putIfAbsent(listener, new ChildListener() {
-                        public void childChanged(String parentPath, List<String> currentChilds) {
-                            for (String child : currentChilds) {
-								child = URL.decode(child);
-                                if (! anyServices.contains(child)) {
-                                    anyServices.add(child);
-                                    subscribe(url.setPath(child).addParameters(Constants.INTERFACE_KEY, child, 
-                                            Constants.CHECK_KEY, String.valueOf(false)), listener);
-                                }
-                            }
-                        }
-                    });
-                    zkListener = listeners.get(listener);
-                }
-                etcdClient.create(root, true);
-                List<String> services = etcdClient.addChildListener(root, zkListener);
-                if (services != null && services.size() > 0) {
-                    for (String service : services) {
-						service = URL.decode(service);
-						anyServices.add(service);
-                        subscribe(url.setPath(service).addParameters(Constants.INTERFACE_KEY, service, 
-                                Constants.CHECK_KEY, String.valueOf(false)), listener);
-                    }
-                }
+            	doSubscribeForAnyInterfaces(url,listener);
             } else {
                 List<URL> urls = new ArrayList<URL>();
                 for (String path : toCategoriesPath(url)) {
-                    ConcurrentMap<NotifyListener, ChildListener> listeners = etcdListeners.get(url);
-                    if (listeners == null) {
-                        etcdListeners.putIfAbsent(url, new ConcurrentHashMap<NotifyListener, ChildListener>());
-                        listeners = etcdListeners.get(url);
+                	 etcdClient.create(path, true);
+                    ConcurrentMap<NotifyListener, ChildListener> categoriesListeners = serviceListeners.get(url);
+                    if (categoriesListeners == null) {
+                    	serviceListeners.putIfAbsent(url, new ConcurrentHashMap<NotifyListener, ChildListener>());
+                    	categoriesListeners = serviceListeners.get(url);
                     }
-                    ChildListener zkListener = listeners.get(listener);
-                    if (zkListener == null) {
-                        listeners.putIfAbsent(listener, new ChildListener() {
+                     ChildListener childListener = categoriesListeners.get(listener);
+                    if (childListener == null) {
+                    	categoriesListeners.putIfAbsent(listener, new ChildListener() {
                             public void childChanged(String parentPath, List<String> currentChilds) {
                             	EtcdRegistry.this.notify(url, listener, toUrlsWithEmpty(url, parentPath, currentChilds));
                             }
                         });
-                        zkListener = listeners.get(listener);
+                    	childListener = categoriesListeners.get(listener);
                     }
-                    etcdClient.create(path, true);
-                   List<String> children = etcdClient.addChildListener(path, zkListener);
+                   List<String> children = etcdClient.addChildListener(path, childListener);
                     if (children != null) {
                     	urls.addAll(toUrlsWithEmpty(url, path, children));
                     }
@@ -162,6 +127,42 @@ public class EtcdRegistry extends FailbackRegistry {
             }
         } catch (Throwable e) {
             throw new RpcException("Failed to subscribe " + url + " to etcd " + getUrl() + ", cause: " + e.getMessage(), e);
+        }
+	}
+
+	private void doSubscribeForAnyInterfaces(final URL url, final NotifyListener listener) throws Exception {
+        String root = toRootPath();
+        ConcurrentMap<NotifyListener, ChildListener> listeners = serviceListeners.get(url);
+        if (listeners == null) {
+        	serviceListeners.putIfAbsent(url, new ConcurrentHashMap<NotifyListener, ChildListener>());
+            listeners = serviceListeners.get(url);
+        }
+        ChildListener etcdListener = listeners.get(listener);
+        if (etcdListener == null) {
+            listeners.putIfAbsent(listener, new ChildListener() {
+                public void childChanged(String parentPath, List<String> currentChilds) {
+                    for (String child : currentChilds) {
+						child = URL.decode(child);
+                        if (! anyServices.contains(child)) {
+                            anyServices.add(child);
+                            subscribe(url.setPath(child).addParameters(Constants.INTERFACE_KEY, child, 
+                                    Constants.CHECK_KEY, String.valueOf(false)), listener);
+                        }
+                    }
+                }
+            });
+            etcdListener = listeners.get(listener);
+        }
+        etcdClient.create(root, true);
+        List<String> services = etcdClient.addChildListener(root, etcdListener);
+        
+        if (services != null && services.size() > 0) {
+            for (String service : services) {
+				service = URL.decode(service);
+				anyServices.add(service);
+                subscribe(url.setPath(service).addParameters(Constants.INTERFACE_KEY, service, 
+                        Constants.CHECK_KEY, String.valueOf(false)), listener);
+            }
         }
 	}
 
