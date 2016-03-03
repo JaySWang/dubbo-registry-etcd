@@ -51,10 +51,19 @@ public class EtcdRegistry extends FailbackRegistry {
 		return etcdClient.isAvailable();
 	}
 
+	public void destroy() {
+		super.destroy();
+		try {
+			etcdClient.close();
+		} catch (Exception e) {
+			logger.warn("Failed to close etcd client " + getUrl() + ", cause: " + e.getMessage(), e);
+		}
+	}
+
 	@Override
 	protected void doRegister(URL url) {
 		logger.debug("doRegister: " + url);
-		etcdClient.create(toUrlPath(url), false);
+		etcdClient.create(toUrlPath(url));
 	}
 
 	private String toUrlPath(URL url) {
@@ -104,7 +113,6 @@ public class EtcdRegistry extends FailbackRegistry {
 					serviceListeners.putIfAbsent(url, childListeners);
 				}
 				for (String path : toCategoriesPath(url)) {
-					etcdClient.create(path, true);
 					ChildListener categoriesListener = childListeners.get(listener);
 					if (categoriesListener == null) {
 						categoriesListener = new ChildListener() {
@@ -151,7 +159,6 @@ public class EtcdRegistry extends FailbackRegistry {
 			});
 			etcdListener = listeners.get(listener);
 		}
-		etcdClient.create(root, true);
 		List<String> services = etcdClient.addChildListener(root, etcdListener);
 
 		if (services != null && services.size() > 0) {
@@ -212,6 +219,25 @@ public class EtcdRegistry extends FailbackRegistry {
 		ChildListener childListener = childListeners.get(listener);
 		etcdClient.removeChildListener(childListener);
 
+	}
+
+	public List<URL> lookup(URL url) {
+		if (url == null) {
+			throw new IllegalArgumentException("lookup url == null");
+		}
+		try {
+			List<String> providers = new ArrayList<String>();
+			for (String path : toCategoriesPath(url)) {
+				List<String> children = etcdClient.getChildren(path);
+				if (children != null) {
+					providers.addAll(children);
+				}
+			}
+			return toUrlsWithoutEmpty(url, providers);
+		} catch (Throwable e) {
+			throw new RpcException(
+					"Failed to lookup " + url + " from zookeeper " + getUrl() + ", cause: " + e.getMessage(), e);
+		}
 	}
 
 }

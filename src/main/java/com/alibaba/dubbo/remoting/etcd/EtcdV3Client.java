@@ -16,8 +16,8 @@ public class EtcdV3Client implements EtcdClient {
 		etcdClient = new EtcdClientAdaptor(host, port);
 	}
 
-	public void create(String path, boolean isDir) {
-		etcdClient.create(path, isDir);
+	public void create(String path) {
+		etcdClient.create(path);
 	}
 
 	public List<String> addChildListener(String path, final ChildListener childListener) {
@@ -57,4 +57,11 @@ public class EtcdV3Client implements EtcdClient {
 		etcdClient.delete(urlPath);
 	}
 
+	public void close() throws InterruptedException {
+		etcdClient.close();		
+	}
+
+	public List<String> getChildren(String path) {
+		return 	etcdClient.getChildren(path);
+	}
 }
