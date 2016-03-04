@@ -36,7 +36,7 @@ public class EtcdRegistry extends FailbackRegistry {
 
 	public EtcdRegistry(URL url) {
 		super(url);
-		logger.debug("star EtcdRegistry");
+		logger.info("star EtcdRegistry: " + url);
 		String group = url.getParameter(Constants.GROUP_KEY, DEFAULT_ROOT);
 		if (!group.startsWith(Constants.PATH_SEPARATOR)) {
 			group = Constants.PATH_SEPARATOR + group;
@@ -48,7 +48,16 @@ public class EtcdRegistry extends FailbackRegistry {
 	}
 
 	public boolean isAvailable() {
-		return etcdClient.isAvailable();
+		//need to improve
+		boolean isAvailable = false;
+		try {
+			isAvailable = etcdClient.isAvailable();
+		} catch (Throwable e) {
+			isAvailable = false;
+			e.printStackTrace();
+		}
+		logger.info("isAvailable: " + isAvailable);
+		return isAvailable;
 	}
 
 	public void destroy() {
@@ -62,7 +71,7 @@ public class EtcdRegistry extends FailbackRegistry {
 
 	@Override
 	protected void doRegister(URL url) {
-		logger.debug("doRegister: " + url);
+		logger.info("doRegister: " + url);
 		etcdClient.create(toUrlPath(url));
 	}
 
@@ -96,12 +105,13 @@ public class EtcdRegistry extends FailbackRegistry {
 
 	@Override
 	protected void doUnregister(URL url) {
-		logger.debug("doUnregister: " + url);
+		logger.info("doUnregister: " + url);
 		etcdClient.delete(toUrlPath(url));
 	}
 
 	@Override
 	protected void doSubscribe(final URL url, final NotifyListener listener) {
+		logger.info("doSubscribe: " + url);
 		try {
 			if (Constants.ANY_VALUE.equals(url.getServiceInterface())) {
 				doSubscribeForAnyInterfaces(url, listener);
@@ -112,20 +122,23 @@ public class EtcdRegistry extends FailbackRegistry {
 					childListeners = new ConcurrentHashMap<NotifyListener, ChildListener>();
 					serviceListeners.putIfAbsent(url, childListeners);
 				}
-				for (String path : toCategoriesPath(url)) {
-					ChildListener categoriesListener = childListeners.get(listener);
-					if (categoriesListener == null) {
-						categoriesListener = new ChildListener() {
-							public void childChanged(String path, List<String> currentChilds) {
-								EtcdRegistry.this.notify(url, listener, toUrlsWithEmpty(url, path, currentChilds));
-							}
-						};
-
-						childListeners.putIfAbsent(listener, categoriesListener);
-					}
-					List<String> urlsOfTheCategory = etcdClient.addChildListener(path, categoriesListener);
-					if (urlsOfTheCategory != null) {
-						urls.addAll(toUrlsWithEmpty(url, path, urlsOfTheCategory));
+				String[] pathes = toCategoriesPath(url);
+				if (pathes != null && pathes.length > 0) {
+					for (String path : pathes) {
+						ChildListener categoriesListener = childListeners.get(listener);
+						if (categoriesListener == null) {
+							categoriesListener = new ChildListener() {
+								public void childChanged(String parentpath, List<String> currentChilds) {
+									EtcdRegistry.this.notify(url, listener,
+											toUrlsWithEmpty(url, parentpath, currentChilds));
+								}
+							};
+							childListeners.putIfAbsent(listener, categoriesListener);
+						}
+						List<String> urlsOfTheCategory = etcdClient.addChildListener(path, categoriesListener);
+						if (urlsOfTheCategory != null) {
+							urls.addAll(toUrlsWithEmpty(url, path, urlsOfTheCategory));
+						}
 					}
 				}
 				super.notify(url, listener, urls);
@@ -136,31 +149,38 @@ public class EtcdRegistry extends FailbackRegistry {
 		}
 	}
 
+	protected void notify(URL url, NotifyListener listener, List<URL> urls) {
+		super.notify(url, listener, urls);
+	}
+
 	private void doSubscribeForAnyInterfaces(final URL url, final NotifyListener listener) throws Exception {
+		logger.info("doSubscribeForAnyInterfaces: " + url);
 		String root = toRootPath();
 		ConcurrentMap<NotifyListener, ChildListener> listeners = serviceListeners.get(url);
 		if (listeners == null) {
-			serviceListeners.putIfAbsent(url, new ConcurrentHashMap<NotifyListener, ChildListener>());
-			listeners = serviceListeners.get(url);
+			listeners = new ConcurrentHashMap<NotifyListener, ChildListener>();
+			serviceListeners.putIfAbsent(url, listeners);
 		}
 		ChildListener etcdListener = listeners.get(listener);
 		if (etcdListener == null) {
 			listeners.putIfAbsent(listener, new ChildListener() {
 				public void childChanged(String parentPath, List<String> currentChilds) {
-					for (String child : currentChilds) {
-						child = URL.decode(child);
-						if (!anyServices.contains(child)) {
-							anyServices.add(child);
-							subscribe(url.setPath(child).addParameters(Constants.INTERFACE_KEY, child,
-									Constants.CHECK_KEY, String.valueOf(false)), listener);
+					if (currentChilds != null && currentChilds.size() > 0) {
+						for (String child : currentChilds) {
+							child = URL.decode(child);
+							if (!anyServices.contains(child)) {
+								anyServices.add(child);
+								subscribe(url.setPath(child).addParameters(Constants.INTERFACE_KEY, child,
+										Constants.CHECK_KEY, String.valueOf(false)), listener);
+							}
 						}
 					}
 				}
 			});
 			etcdListener = listeners.get(listener);
 		}
+		etcdClient.create(root);
 		List<String> services = etcdClient.addChildListener(root, etcdListener);
-
 		if (services != null && services.size() > 0) {
 			for (String service : services) {
 				service = URL.decode(service);
@@ -222,6 +242,8 @@ public class EtcdRegistry extends FailbackRegistry {
 	}
 
 	public List<URL> lookup(URL url) {
+		logger.info("lookup: " + url);
+
 		if (url == null) {
 			throw new IllegalArgumentException("lookup url == null");
 		}
@@ -240,4 +262,10 @@ public class EtcdRegistry extends FailbackRegistry {
 		}
 	}
 
+	public static void mian(String[] aargs) {
+		URL url = URL.valueOf(
+				"etcd://127.0.0.1:2378/com.alibaba.dubbo.registry.RegistryService?application=demo-provider&dubbo=2.0.0&interface=com.alibaba.dubbo.registry.RegistryService&owner=william&pid=13044&timestamp=1457072437304");
+		EtcdRegistry registry = new EtcdRegistry(url);
+		registry.doSubscribe(url, null);
+	}
 }

@@ -25,7 +25,10 @@ public class EtcdV3Client implements EtcdClient {
 		if (categoryWatchListeners == null) {
 			categoryWatchListeners = new ConcurrentHashMap<String, WatchListener>();
 		}
-		categoriesListeners.putIfAbsent(childListener, categoryWatchListeners);
+		if(!categoriesListeners.containsKey(childListener))
+		{
+			categoriesListeners.put(childListener, categoryWatchListeners);
+		}
 		WatchListener categoryWatchlistener = categoryWatchListeners.get(path);
 		if (categoryWatchlistener == null) {
 			categoryWatchlistener = new WatchListener() {
@@ -34,7 +37,9 @@ public class EtcdV3Client implements EtcdClient {
 				}
 			};
 		}
-		categoryWatchListeners.putIfAbsent(path, categoryWatchlistener);
+		if(!categoryWatchListeners.containsKey(path)){
+			categoryWatchListeners.put(path, categoryWatchlistener);
+		}
 		List<String> services = etcdClient.addWatchListener(path, categoryWatchlistener);
 		return services;
 	}
