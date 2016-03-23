@@ -41,7 +41,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
-public class EtcdClient {
+public class JEtcdClient {
    CloseableHttpAsyncClient httpClient = buildDefaultHttpClient();
     static final Gson gson = new GsonBuilder().create();
 	private static final ConcurrentMap<String, ConcurrentMap<ChildListener, TargetChildListener>> childListeners = new ConcurrentHashMap<String, ConcurrentMap<ChildListener, TargetChildListener>>();
@@ -56,7 +56,7 @@ public class EtcdClient {
 
     final URI baseUri;
 
-    public EtcdClient(URI baseUri) {
+    public JEtcdClient(URI baseUri) {
         String uri = baseUri.toString();
         if (!uri.endsWith("/")) {
             uri += "/";
@@ -90,6 +90,17 @@ public class EtcdClient {
 
         return syncExecute(request, new int[] { 200, 404 });
     }
+    
+    /**
+     * Deletes the given dir
+     */
+    public EtcdResult deleteDir(String key) throws EtcdClientException {
+        URI uri = buildKeyUri("v2/keys", key, "?recursive=true");
+        HttpDelete request = new HttpDelete(uri);
+
+        return syncExecute(request, new int[] { 200, 404 });
+    }
+    
 
     /**
      * Sets a key to a new value
@@ -313,23 +324,6 @@ public class EtcdClient {
         } catch (ExecutionException e) {
             throw unwrap(e);
         }
-
-        // ListenableFuture<HttpResponse> response = asyncExecuteHttp(request);
-        //
-        // HttpResponse httpResponse;
-        // try {
-        // httpResponse = response.get();
-        // } catch (InterruptedException e) {
-        // Thread.currentThread().interrupt();
-        // throw new
-        // EtcdClientException("Interrupted during request processing", e);
-        // } catch (ExecutionException e) {
-        // // TODO: Unwrap?
-        // throw new EtcdClientException("Error executing request", e);
-        // }
-        //
-        // String json = parseJsonResponse(httpResponse);
-        // return json;
     }
 
     protected ListenableFuture<JsonResponse> asyncExecuteJson(HttpUriRequest request, final int[] expectedHttpStatusCodes) throws EtcdClientException {
@@ -491,7 +485,7 @@ public class EtcdClient {
 	}
 
 	public List<String> addTargetChildListener(String path, final TargetChildListener listener) throws Exception {
-		EtcdClient etcdClient = new EtcdClient(baseUri);
+		JEtcdClient etcdClient = new JEtcdClient(baseUri);
 		return etcdClient.watchChildChanges(path, listener);
 	}
 	

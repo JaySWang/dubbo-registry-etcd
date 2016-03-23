@@ -18,6 +18,6 @@ public class EtcdNode {
 
 	@Override
 	public String toString() {
-		return EtcdClient.format(this);
+		return JEtcdClient.format(this);
 	}
 }
