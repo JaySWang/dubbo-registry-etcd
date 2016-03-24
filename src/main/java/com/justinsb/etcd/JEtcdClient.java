@@ -42,422 +42,425 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 
 public class JEtcdClient {
-   CloseableHttpAsyncClient httpClient = buildDefaultHttpClient();
-    static final Gson gson = new GsonBuilder().create();
+	CloseableHttpAsyncClient httpClient = buildDefaultHttpClient();
+	static final Gson gson = new GsonBuilder().create();
 	private static final ConcurrentMap<String, ConcurrentMap<ChildListener, TargetChildListener>> childListeners = new ConcurrentHashMap<String, ConcurrentMap<ChildListener, TargetChildListener>>();
 
-     CloseableHttpAsyncClient buildDefaultHttpClient() {
-        // TODO: Increase timeout??
-        RequestConfig requestConfig = RequestConfig.custom().build();
-        CloseableHttpAsyncClient httpClient = HttpAsyncClients.custom().setDefaultRequestConfig(requestConfig).build();
-        httpClient.start();
-        return httpClient;
-    }
+	CloseableHttpAsyncClient buildDefaultHttpClient() {
+		// TODO: Increase timeout??
+		RequestConfig requestConfig = RequestConfig.custom().build();
+		CloseableHttpAsyncClient httpClient = HttpAsyncClients.custom().setDefaultRequestConfig(requestConfig).build();
+		httpClient.start();
+		return httpClient;
+	}
 
-    final URI baseUri;
+	final URI baseUri;
 
-    public JEtcdClient(URI baseUri) {
-        String uri = baseUri.toString();
-        if (!uri.endsWith("/")) {
-            uri += "/";
-            baseUri = URI.create(uri);
-        }
-        this.baseUri = baseUri;
-    }
+	public JEtcdClient(URI baseUri) {
+		String uri = baseUri.toString();
+		if (!uri.endsWith("/")) {
+			uri += "/";
+			baseUri = URI.create(uri);
+		}
+		this.baseUri = baseUri;
+	}
 
-    /**
-     * Retrieves a key. Returns null if not found.
-     */
-    public EtcdResult get(String key) throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "");
-        HttpGet request = new HttpGet(uri);
+	/**
+	 * Retrieves a key. Returns null if not found.
+	 */
+	public EtcdResult get(String key) throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "");
+		HttpGet request = new HttpGet(uri);
 
-        EtcdResult result = syncExecute(request, new int[] { 200, 404 }, 100);
-        if (result.isError()) {
-            if (result.errorCode == 100) {
-                return null;
-            }
-        }
-        return result;
-    }
+		EtcdResult result = syncExecute(request, new int[] { 200, 404 }, 100);
+		if (result.isError()) {
+			if (result.errorCode == 100) {
+				return null;
+			}
+		}
+		return result;
+	}
 
-    /**
-     * Deletes the given key
-     */
-    public EtcdResult delete(String key) throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "");
-        HttpDelete request = new HttpDelete(uri);
+	/**
+	 * Deletes the given key
+	 */
+	public EtcdResult delete(String key) throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "");
+		HttpDelete request = new HttpDelete(uri);
 
-        return syncExecute(request, new int[] { 200, 404 });
-    }
-    
-    /**
-     * Deletes the given dir
-     */
-    public EtcdResult deleteDir(String key) throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "?recursive=true");
-        HttpDelete request = new HttpDelete(uri);
+		return syncExecute(request, new int[] { 200, 404 });
+	}
 
-        return syncExecute(request, new int[] { 200, 404 });
-    }
-    
+	/**
+	 * Deletes the given dir and it child nodes
+	 */
+	public EtcdResult deleteDir(String key) throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "?recursive=true");
+		HttpDelete request = new HttpDelete(uri);
 
-    /**
-     * Sets a key to a new value
-     */
-    public EtcdResult set(String key, String value) throws EtcdClientException {
-        return set(key, value, null);
-    }
+		return syncExecute(request, new int[] { 200, 404 });
+	}
 
-    /**
-     * Sets a key to a new value with an (optional) ttl
-     */
+	/**
+	 * Sets a key to a new value
+	 */
+	public EtcdResult set(String key, String value) throws EtcdClientException {
+		return set(key, value, null);
+	}
 
-    public EtcdResult set(String key, String value, Integer ttl) throws EtcdClientException {
-        List<BasicNameValuePair> data = Lists.newArrayList();
-        data.add(new BasicNameValuePair("value", value));
-        if (ttl != null) {
-            data.add(new BasicNameValuePair("ttl", Integer.toString(ttl)));
-        }
+	/**
+	 * Sets a key to a new value with an (optional) ttl
+	 */
 
-        return set0(key, data, new int[] { 200, 201 });
-    }
+	public EtcdResult set(String key, String value, Integer ttl) throws EtcdClientException {
+		List<BasicNameValuePair> data = Lists.newArrayList();
+		data.add(new BasicNameValuePair("value", value));
+		if (ttl != null) {
+			data.add(new BasicNameValuePair("ttl", Integer.toString(ttl)));
+		}
 
-    /**
-     * Creates a directory
-     */
-    public EtcdResult createDirectory(String key) throws EtcdClientException {
-        List<BasicNameValuePair> data = Lists.newArrayList();
-        data.add(new BasicNameValuePair("dir", "true"));
-        return set0(key, data, new int[] { 102,200, 201 });
-    }
-    
-    /**
-     * Lists a directory
-     */
-    public List<EtcdNode> listDirectory(String key) throws EtcdClientException {
-      EtcdResult result = get(key + "/");
-      if (result == null || result.node == null) {
-        return null;
-      }
-      return result.node.nodes;
-    }
-    /**
-     * Delete a directory
-     */
-    public EtcdResult deleteDirectory(String key) throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "?dir=true");
-        HttpDelete request = new HttpDelete(uri);
-        return syncExecute(request, new int[] { 202 });
-    }
+		return set0(key, data, new int[] { 200, 201 });
+	}
 
-    /**
-     * Sets a key to a new value, if the value is a specified value
-     */
-    public EtcdResult cas(String key, String prevValue, String value) throws EtcdClientException {
-        List<BasicNameValuePair> data = Lists.newArrayList();
-        data.add(new BasicNameValuePair("value", value));
-        data.add(new BasicNameValuePair("prevValue", prevValue));
+	/**
+	 * Creates a directory
+	 */
+	public EtcdResult createDirectory(String key) throws EtcdClientException {
+		List<BasicNameValuePair> data = Lists.newArrayList();
+		data.add(new BasicNameValuePair("dir", "true"));
+		return set0(key, data, new int[] { 102, 200, 201 });
+	}
 
-        return set0(key, data, new int[] { 200, 412 }, 101);
-    }
+	/**
+	 * Lists a directory
+	 */
+	public List<EtcdNode> listDirectory(String key) throws EtcdClientException {
+		EtcdResult result = get(key + "/");
+		if (result == null || result.node == null) {
+			return null;
+		}
+		return result.node.nodes;
+	}
 
-    /**
-     * Watches the given subtree
-     */
-    public ListenableFuture<EtcdResult> watch(String key) throws EtcdClientException {
-        return watch(key, null, false);
-    }
+	/**
+	 * Delete a directory
+	 */
+	public EtcdResult deleteDirectory(String key) throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "?dir=true");
+		HttpDelete request = new HttpDelete(uri);
+		return syncExecute(request, new int[] { 202 });
+	}
 
-    /**
-     * Watches the given subtree
-     */
-    public ListenableFuture<EtcdResult> watch(String key, Long index, boolean recursive) throws EtcdClientException {
-    	String suffix = "?wait=true";
-    	if (index != null) {
-    		suffix += "&waitIndex=" + index;
-    	}
-    	if (recursive) {
-    		suffix += "&recursive=true";
-    	}
-        URI uri = buildKeyUri("v2/keys", key, suffix);
+	/**
+	 * Sets a key to a new value, if the value is a specified value
+	 */
+	public EtcdResult cas(String key, String prevValue, String value) throws EtcdClientException {
+		List<BasicNameValuePair> data = Lists.newArrayList();
+		data.add(new BasicNameValuePair("value", value));
+		data.add(new BasicNameValuePair("prevValue", prevValue));
 
-        HttpGet request = new HttpGet(uri);
+		return set0(key, data, new int[] { 200, 412 }, 101);
+	}
 
-        return asyncExecute(request, new int[] { 200 });
-    }
+	/**
+	 * Watches the given subtree
+	 */
+	public ListenableFuture<EtcdResult> watch(String key) throws EtcdClientException {
+		return watch(key, null, false);
+	}
 
-    /**
-     * Gets the etcd version
-     */
-    public String getVersion() throws EtcdClientException {
-        URI uri = baseUri.resolve("version");
+	/**
+	 * Watches the given subtree
+	 */
+	public ListenableFuture<EtcdResult> watch(String key, Long index, boolean recursive) throws EtcdClientException {
+		String suffix = "?wait=true";
+		if (index != null) {
+			suffix += "&waitIndex=" + index;
+		}
+		if (recursive) {
+			suffix += "&recursive=true";
+		}
+		URI uri = buildKeyUri("v2/keys", key, suffix);
 
-        HttpGet request = new HttpGet(uri);
+		HttpGet request = new HttpGet(uri);
 
-        // Technically not JSON, but it'll work
-        // This call is the odd one out
-        JsonResponse s = syncExecuteJson(request, 200);
-        if (s.httpStatusCode != 200) {
-            throw new EtcdClientException("Error while fetching versions", s.httpStatusCode);
-        }
-        return s.json;
-    }
+		return asyncExecute(request, new int[] { 200 });
+	}
 
-    private EtcdResult set0(String key, List<BasicNameValuePair> data, int[] httpErrorCodes, int... expectedErrorCodes)
-            throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "");
+	/**
+	 * Gets the etcd version
+	 */
+	public String getVersion() throws EtcdClientException {
+		URI uri = baseUri.resolve("version");
 
-        HttpPut request = new HttpPut(uri);
+		HttpGet request = new HttpGet(uri);
 
-        UrlEncodedFormEntity entity = new UrlEncodedFormEntity(data, Charsets.UTF_8);
-        request.setEntity(entity);
+		// Technically not JSON, but it'll work
+		// This call is the odd one out
+		JsonResponse s = syncExecuteJson(request, 200);
+		if (s.httpStatusCode != 200) {
+			throw new EtcdClientException("Error while fetching versions", s.httpStatusCode);
+		}
+		return s.json;
+	}
 
-        return syncExecute(request, httpErrorCodes, expectedErrorCodes);
-    }
+	private EtcdResult set0(String key, List<BasicNameValuePair> data, int[] httpErrorCodes, int... expectedErrorCodes)
+			throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "");
 
-    public EtcdResult listChildren(String key) throws EtcdClientException {
-        URI uri = buildKeyUri("v2/keys", key, "/");
-        HttpGet request = new HttpGet(uri);
+		HttpPut request = new HttpPut(uri);
 
-        EtcdResult result = syncExecute(request, new int[] { 200 });
-        return result;
-    }
+		UrlEncodedFormEntity entity = new UrlEncodedFormEntity(data, Charsets.UTF_8);
+		request.setEntity(entity);
 
-    protected ListenableFuture<EtcdResult> asyncExecute(HttpUriRequest request, int[] expectedHttpStatusCodes, final int... expectedErrorCodes)
-            throws EtcdClientException {
-        ListenableFuture<JsonResponse> json = asyncExecuteJson(request, expectedHttpStatusCodes);
-        return Futures.transform(json, new AsyncFunction<JsonResponse, EtcdResult>() {
-            public ListenableFuture<EtcdResult> apply(JsonResponse json) throws Exception {
-                EtcdResult result = jsonToEtcdResult(json, expectedErrorCodes);
-                return Futures.immediateFuture(result);
-            }
-        });
-    }
+		return syncExecute(request, httpErrorCodes, expectedErrorCodes);
+	}
 
-    protected EtcdResult syncExecute(HttpUriRequest request, int[] expectedHttpStatusCodes, int... expectedErrorCodes) throws EtcdClientException {
-        try {
-            return asyncExecute(request, expectedHttpStatusCodes, expectedErrorCodes).get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+	public EtcdResult listChildren(String key) throws EtcdClientException {
+		URI uri = buildKeyUri("v2/keys", key, "/");
+		HttpGet request = new HttpGet(uri);
 
-            throw new EtcdClientException("Interrupted during request", e);
-        } catch (ExecutionException e) {
-            throw unwrap(e);
-        }
-        // String json = syncExecuteJson(request);
-        // return jsonToEtcdResult(json, expectedErrorCodes);
-    }
+		EtcdResult result = syncExecute(request, new int[] { 200 });
+		return result;
+	}
 
-    private EtcdClientException unwrap(ExecutionException e) {
-        Throwable cause = e.getCause();
-        if (cause instanceof EtcdClientException) {
-            return (EtcdClientException) cause;
-        }
-        return new EtcdClientException("Error executing request", e);
-    }
+	protected ListenableFuture<EtcdResult> asyncExecute(HttpUriRequest request, int[] expectedHttpStatusCodes,
+			final int... expectedErrorCodes) throws EtcdClientException {
+		ListenableFuture<JsonResponse> json = asyncExecuteJson(request, expectedHttpStatusCodes);
+		return Futures.transform(json, new AsyncFunction<JsonResponse, EtcdResult>() {
+			public ListenableFuture<EtcdResult> apply(JsonResponse json) throws Exception {
+				EtcdResult result = jsonToEtcdResult(json, expectedErrorCodes);
+				return Futures.immediateFuture(result);
+			}
+		});
+	}
 
-    private EtcdResult jsonToEtcdResult(JsonResponse response, int... expectedErrorCodes) throws EtcdClientException {
-        if (response == null || response.json == null) {
-            return null;
-        }
-        EtcdResult result = parseEtcdResult(response.json);
+	protected EtcdResult syncExecute(HttpUriRequest request, int[] expectedHttpStatusCodes, int... expectedErrorCodes)
+			throws EtcdClientException {
+		try {
+			return asyncExecute(request, expectedHttpStatusCodes, expectedErrorCodes).get();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
 
-        if (result.isError()) {
-            if (!contains(expectedErrorCodes, result.errorCode)) {
-                throw new EtcdClientException(result.message, result);
-            }
-        }
-        return result;
-    }
+			throw new EtcdClientException("Interrupted during request", e);
+		} catch (ExecutionException e) {
+			throw unwrap(e);
+		}
+		// String json = syncExecuteJson(request);
+		// return jsonToEtcdResult(json, expectedErrorCodes);
+	}
 
-    private EtcdResult parseEtcdResult(String json) throws EtcdClientException {
-        EtcdResult result;
-        try {
-            result = gson.fromJson(json, EtcdResult.class);
-        } catch (JsonParseException e) {
-            throw new EtcdClientException("Error parsing response from etcd", e);
-        }
-        return result;
-    }
+	private EtcdClientException unwrap(ExecutionException e) {
+		Throwable cause = e.getCause();
+		if (cause instanceof EtcdClientException) {
+			return (EtcdClientException) cause;
+		}
+		return new EtcdClientException("Error executing request", e);
+	}
 
-    private static boolean contains(int[] list, int find) {
-        for (int i = 0; i < list.length; i++) {
-            if (list[i] == find) {
-                return true;
-            }
-        }
-        return false;
-    }
+	private EtcdResult jsonToEtcdResult(JsonResponse response, int... expectedErrorCodes) throws EtcdClientException {
+		if (response == null || response.json == null) {
+			return null;
+		}
+		EtcdResult result = parseEtcdResult(response.json);
 
-    protected List<EtcdResult> syncExecuteList(HttpUriRequest request) throws EtcdClientException {
-        JsonResponse response = syncExecuteJson(request, 200);
-        if (response.json == null) {
-            return null;
-        }
+		if (result.isError()) {
+			if (!contains(expectedErrorCodes, result.errorCode)) {
+				throw new EtcdClientException(result.message, result);
+			}
+		}
+		return result;
+	}
 
-        if (response.httpStatusCode != 200) {
-            EtcdResult etcdResult = parseEtcdResult(response.json);
-            throw new EtcdClientException("Error listing keys", etcdResult);
-        }
+	private EtcdResult parseEtcdResult(String json) throws EtcdClientException {
+		EtcdResult result;
+		try {
+			result = gson.fromJson(json, EtcdResult.class);
+		} catch (JsonParseException e) {
+			throw new EtcdClientException("Error parsing response from etcd", e);
+		}
+		return result;
+	}
 
-        try {
-            List<EtcdResult> ret = new ArrayList<EtcdResult>();
-            JsonParser parser = new JsonParser();
-            JsonArray array = parser.parse(response.json).getAsJsonArray();
-            for (int i = 0; i < array.size(); i++) {
-                EtcdResult next = gson.fromJson(array.get(i), EtcdResult.class);
-                ret.add(next);
-            }
-            return ret;
-        } catch (JsonParseException e) {
-            throw new EtcdClientException("Error parsing response from etcd", e);
-        }
-    }
+	private static boolean contains(int[] list, int find) {
+		for (int i = 0; i < list.length; i++) {
+			if (list[i] == find) {
+				return true;
+			}
+		}
+		return false;
+	}
 
-    protected JsonResponse syncExecuteJson(HttpUriRequest request, int... expectedHttpStatusCodes) throws EtcdClientException {
-        try {
-            return asyncExecuteJson(request, expectedHttpStatusCodes).get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new EtcdClientException("Interrupted during request processing", e);
-        } catch (ExecutionException e) {
-            throw unwrap(e);
-        }
-    }
+	protected List<EtcdResult> syncExecuteList(HttpUriRequest request) throws EtcdClientException {
+		JsonResponse response = syncExecuteJson(request, 200);
+		if (response.json == null) {
+			return null;
+		}
 
-    protected ListenableFuture<JsonResponse> asyncExecuteJson(HttpUriRequest request, final int[] expectedHttpStatusCodes) throws EtcdClientException {
-        ListenableFuture<HttpResponse> response = asyncExecuteHttp(request);
+		if (response.httpStatusCode != 200) {
+			EtcdResult etcdResult = parseEtcdResult(response.json);
+			throw new EtcdClientException("Error listing keys", etcdResult);
+		}
 
-        return Futures.transform(response, new AsyncFunction<HttpResponse, JsonResponse>() {
-            public ListenableFuture<JsonResponse> apply(HttpResponse httpResponse) throws Exception {
-                JsonResponse json = extractJsonResponse(httpResponse, expectedHttpStatusCodes);
-                return Futures.immediateFuture(json);
-            }
-        });
-    }
+		try {
+			List<EtcdResult> ret = new ArrayList<EtcdResult>();
+			JsonParser parser = new JsonParser();
+			JsonArray array = parser.parse(response.json).getAsJsonArray();
+			for (int i = 0; i < array.size(); i++) {
+				EtcdResult next = gson.fromJson(array.get(i), EtcdResult.class);
+				ret.add(next);
+			}
+			return ret;
+		} catch (JsonParseException e) {
+			throw new EtcdClientException("Error parsing response from etcd", e);
+		}
+	}
 
-    /**
-     * We need the status code & the response to parse an error response.
-     */
-    static class JsonResponse {
-        final String json;
-        final int httpStatusCode;
+	protected JsonResponse syncExecuteJson(HttpUriRequest request, int... expectedHttpStatusCodes)
+			throws EtcdClientException {
+		try {
+			return asyncExecuteJson(request, expectedHttpStatusCodes).get();
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new EtcdClientException("Interrupted during request processing", e);
+		} catch (ExecutionException e) {
+			throw unwrap(e);
+		}
+	}
 
-        public JsonResponse(String json, int statusCode) {
-            this.json = json;
-            this.httpStatusCode = statusCode;
-        }
+	protected ListenableFuture<JsonResponse> asyncExecuteJson(HttpUriRequest request,
+			final int[] expectedHttpStatusCodes) throws EtcdClientException {
+		ListenableFuture<HttpResponse> response = asyncExecuteHttp(request);
 
-    }
+		return Futures.transform(response, new AsyncFunction<HttpResponse, JsonResponse>() {
+			public ListenableFuture<JsonResponse> apply(HttpResponse httpResponse) throws Exception {
+				JsonResponse json = extractJsonResponse(httpResponse, expectedHttpStatusCodes);
+				return Futures.immediateFuture(json);
+			}
+		});
+	}
 
-    protected JsonResponse extractJsonResponse(HttpResponse httpResponse, int[] expectedHttpStatusCodes) throws EtcdClientException {
-        try {
-            StatusLine statusLine = httpResponse.getStatusLine();
-            int statusCode = statusLine.getStatusCode();
+	/**
+	 * We need the status code & the response to parse an error response.
+	 */
+	static class JsonResponse {
+		final String json;
+		final int httpStatusCode;
 
-            String json = null;
+		public JsonResponse(String json, int statusCode) {
+			this.json = json;
+			this.httpStatusCode = statusCode;
+		}
 
-            if (httpResponse.getEntity() != null) {
-                try {
-                    json = EntityUtils.toString(httpResponse.getEntity());
-                } catch (IOException e) {
-                    throw new EtcdClientException("Error reading response", e);
-                }
-            }
+	}
 
-            if (!contains(expectedHttpStatusCodes, statusCode)) {
-                if (statusCode == 400 && json != null) {
-                    // More information in JSON
-                } else {
-                    throw new EtcdClientException("Error response from etcd: " + statusLine.getReasonPhrase(),
-                            statusCode);
-                }
-            }
+	protected JsonResponse extractJsonResponse(HttpResponse httpResponse, int[] expectedHttpStatusCodes)
+			throws EtcdClientException {
+		try {
+			StatusLine statusLine = httpResponse.getStatusLine();
+			int statusCode = statusLine.getStatusCode();
 
-            return new JsonResponse(json, statusCode);
-        } finally {
-            close(httpResponse);
-        }
-    }
+			String json = null;
 
-    private URI buildKeyUri(String prefix, String key, String suffix) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(prefix);
-        if (key.startsWith("/")) {
-            key = key.substring(1);
-        }
-        for (String token : Splitter.on('/').split(key)) {
-            sb.append("/");
-            sb.append(urlEscape(token));
-        }
-        sb.append(suffix);
+			if (httpResponse.getEntity() != null) {
+				try {
+					json = EntityUtils.toString(httpResponse.getEntity());
+				} catch (IOException e) {
+					throw new EtcdClientException("Error reading response", e);
+				}
+			}
 
-        URI uri = baseUri.resolve(sb.toString());
-        return uri;
-    }
+			if (!contains(expectedHttpStatusCodes, statusCode)) {
+				if (statusCode == 400 && json != null) {
+					// More information in JSON
+				} else {
+					throw new EtcdClientException("Error response from etcd: " + statusLine.getReasonPhrase(),
+							statusCode);
+				}
+			}
 
-    protected ListenableFuture<HttpResponse> asyncExecuteHttp(HttpUriRequest request) {
-        final SettableFuture<HttpResponse> future = SettableFuture.create();
+			return new JsonResponse(json, statusCode);
+		} finally {
+			close(httpResponse);
+		}
+	}
 
-        httpClient.execute(request, new FutureCallback<HttpResponse>() {
-            public void completed(HttpResponse result) {
-                future.set(result);
-            }
+	private URI buildKeyUri(String prefix, String key, String suffix) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(prefix);
+		if (key.startsWith("/")) {
+			key = key.substring(1);
+		}
+		for (String token : Splitter.on('/').split(key)) {
+			sb.append("/");
+			sb.append(urlEscape(token));
+		}
+		sb.append(suffix);
 
-            public void failed(Exception ex) {
-                future.setException(ex);
-            }
+		URI uri = baseUri.resolve(sb.toString());
+		return uri;
+	}
 
-            public void cancelled() {
-                future.setException(new InterruptedException());
-            }
-        });
+	protected ListenableFuture<HttpResponse> asyncExecuteHttp(HttpUriRequest request) {
+		final SettableFuture<HttpResponse> future = SettableFuture.create();
 
-        return future;
-    }
+		httpClient.execute(request, new FutureCallback<HttpResponse>() {
+			public void completed(HttpResponse result) {
+				future.set(result);
+			}
 
-    public static void close(HttpResponse response) {
-        if (response == null) {
-            return;
-        }
-        HttpEntity entity = response.getEntity();
-        if (entity != null) {
-            EntityUtils.consumeQuietly(entity);
-        }
-    }
+			public void failed(Exception ex) {
+				future.setException(ex);
+			}
 
-    protected static String urlEscape(String s) {
-        try {
-            return URLEncoder.encode(s, "UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            throw new IllegalStateException();
-        }
-    }
+			public void cancelled() {
+				future.setException(new InterruptedException());
+			}
+		});
 
-    public static String format(Object o) {
-        try {
-            return gson.toJson(o);
-        } catch (Exception e) {
-            return "Error formatting: " + e.getMessage();
-        }
-    }
+		return future;
+	}
 
-    
-    public void create(String path,boolean isDir) throws EtcdClientException{
+	public static void close(HttpResponse response) {
+		if (response == null) {
+			return;
+		}
+		HttpEntity entity = response.getEntity();
+		if (entity != null) {
+			EntityUtils.consumeQuietly(entity);
+		}
+	}
+
+	protected static String urlEscape(String s) {
+		try {
+			return URLEncoder.encode(s, "UTF-8");
+		} catch (UnsupportedEncodingException e) {
+			throw new IllegalStateException();
+		}
+	}
+
+	public static String format(Object o) {
+		try {
+			return gson.toJson(o);
+		} catch (Exception e) {
+			return "Error formatting: " + e.getMessage();
+		}
+	}
+
+	public void create(String path, boolean isDir) throws EtcdClientException {
 		int i = path.lastIndexOf('/');
 		if (i > 0) {
 			create(path.substring(0, i), true);
 		}
 		if (isDir) {
 			EtcdResult result = get(path);
-			if(result==null){
-			createDirectory(path);
+			if (result == null) {
+				createDirectory(path);
 			}
 		} else {
-			set(path,"");
+			set(path, "");
 		}
-    }
+	}
 
 	public List<String> addChildListener(String path, ChildListener listener) throws Exception {
 
@@ -472,13 +475,12 @@ public class JEtcdClient {
 			targetListener = listeners.get(listener);
 		}
 		return addTargetChildListener(path, targetListener);
-	
+
 	}
 
 	public TargetChildListener createTargetChildListener(String path, final ChildListener listener) {
 		return new TargetChildListener() {
-			public void handleChildChange(String parentPath, List<String> currentChilds)
-					throws Exception {
+			public void handleChildChange(String parentPath, List<String> currentChilds) throws Exception {
 				listener.childChanged(parentPath, currentChilds);
 			}
 		};
@@ -488,63 +490,59 @@ public class JEtcdClient {
 		JEtcdClient etcdClient = new JEtcdClient(baseUri);
 		return etcdClient.watchChildChanges(path, listener);
 	}
-	
+
 	private List<String> watchChildChanges(final String path, final TargetChildListener listener) throws Exception {
 
-		ListenableFuture<EtcdResult> watchFuture = watch(path,null,true); 	
-		watchFuture.addListener(new Runnable(){
+		ListenableFuture<EtcdResult> watchFuture = watch(path, null, true);
+		watchFuture.addListener(new Runnable() {
 			public void run() {
 				try {
-					listener.handleChildChange(path, watchChildChanges(path,listener));
+					listener.handleChildChange(path, watchChildChanges(path, listener));
 				} catch (Exception e) {
 					e.printStackTrace();
-				} 
+				}
 			}
-			},
-			Executors.newCachedThreadPool()
-			);
-		
+		}, Executors.newCachedThreadPool());
+
 		EtcdResult etcdResult = get(path);
-		final List<String> currentChildren  = getURLsFromResult(path,etcdResult);
+		final List<String> currentChildren = getURLsFromResult(path, etcdResult);
 		return currentChildren;
 	}
 
 	private List<String> getURLsFromResult(String path, EtcdResult etcdResult) {
 
-		List<String> list =new ArrayList<String>();
-		if(etcdResult==null){
+		List<String> list = new ArrayList<String>();
+		if (etcdResult == null) {
 			return null;
 		}
 		EtcdNode childNode = etcdResult.node;
-		if(childNode!=null){
+		if (childNode != null) {
 			List<EtcdNode> nodes = childNode.nodes;
-			if(nodes!=null){
-				for(EtcdNode node :nodes){
-					list.add(node.key.substring(path.length()+1));
+			if (nodes != null) {
+				for (EtcdNode node : nodes) {
+					list.add(node.key.substring(path.length() + 1));
 				}
 			}
 
 		}
 		return list;
-	
+
 	}
 
 	public List<String> getChildren(String path) throws EtcdClientException {
-		List<String> list =new ArrayList<String>();
+		List<String> list = new ArrayList<String>();
 		EtcdResult children = get(path);
 		EtcdNode childNode = children.node;
-		if(childNode!=null){
+		if (childNode != null) {
 			List<EtcdNode> nodes = childNode.nodes;
-			if(nodes!=null){
-				for(EtcdNode node :nodes){
-					list.add(node.key.substring(path.length()+1));
+			if (nodes != null) {
+				for (EtcdNode node : nodes) {
+					list.add(node.key.substring(path.length() + 1));
 				}
 			}
 
 		}
 		return list;
 	}
-    
-	
-    
+
 }
