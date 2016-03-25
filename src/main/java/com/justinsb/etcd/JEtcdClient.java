@@ -6,10 +6,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpResponse;
@@ -26,8 +23,6 @@ import org.apache.http.impl.nio.client.HttpAsyncClients;
 import org.apache.http.message.BasicNameValuePair;
 import org.apache.http.util.EntityUtils;
 
-import com.alibaba.dubbo.remoting.etcd.ChildListener;
-import com.alibaba.dubbo.remoting.etcd.TargetChildListener;
 import com.google.common.base.Charsets;
 import com.google.common.base.Splitter;
 import com.google.common.collect.Lists;
@@ -44,7 +39,6 @@ import com.google.gson.JsonParser;
 public class JEtcdClient {
 	CloseableHttpAsyncClient httpClient = buildDefaultHttpClient();
 	static final Gson gson = new GsonBuilder().create();
-	private static final ConcurrentMap<String, ConcurrentMap<ChildListener, TargetChildListener>> childListeners = new ConcurrentHashMap<String, ConcurrentMap<ChildListener, TargetChildListener>>();
 
 	CloseableHttpAsyncClient buildDefaultHttpClient() {
 		// TODO: Increase timeout??
@@ -445,104 +439,6 @@ public class JEtcdClient {
 		} catch (Exception e) {
 			return "Error formatting: " + e.getMessage();
 		}
-	}
-
-	public void create(String path, boolean isDir) throws EtcdClientException {
-		int i = path.lastIndexOf('/');
-		if (i > 0) {
-			create(path.substring(0, i), true);
-		}
-		if (isDir) {
-			EtcdResult result = get(path);
-			if (result == null) {
-				createDirectory(path);
-			}
-		} else {
-			set(path, "");
-		}
-	}
-
-	public List<String> addChildListener(String path, ChildListener listener) throws Exception {
-
-		ConcurrentMap<ChildListener, TargetChildListener> listeners = childListeners.get(path);
-		if (listeners == null) {
-			childListeners.putIfAbsent(path, new ConcurrentHashMap<ChildListener, TargetChildListener>());
-			listeners = childListeners.get(path);
-		}
-		TargetChildListener targetListener = listeners.get(listener);
-		if (targetListener == null) {
-			listeners.putIfAbsent(listener, createTargetChildListener(path, listener));
-			targetListener = listeners.get(listener);
-		}
-		return addTargetChildListener(path, targetListener);
-
-	}
-
-	public TargetChildListener createTargetChildListener(String path, final ChildListener listener) {
-		return new TargetChildListener() {
-			public void handleChildChange(String parentPath, List<String> currentChilds) throws Exception {
-				listener.childChanged(parentPath, currentChilds);
-			}
-		};
-	}
-
-	public List<String> addTargetChildListener(String path, final TargetChildListener listener) throws Exception {
-		JEtcdClient etcdClient = new JEtcdClient(baseUri);
-		return etcdClient.watchChildChanges(path, listener);
-	}
-
-	private List<String> watchChildChanges(final String path, final TargetChildListener listener) throws Exception {
-
-		ListenableFuture<EtcdResult> watchFuture = watch(path, null, true);
-		watchFuture.addListener(new Runnable() {
-			public void run() {
-				try {
-					listener.handleChildChange(path, watchChildChanges(path, listener));
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
-			}
-		}, Executors.newCachedThreadPool());
-
-		EtcdResult etcdResult = get(path);
-		final List<String> currentChildren = getURLsFromResult(path, etcdResult);
-		return currentChildren;
-	}
-
-	private List<String> getURLsFromResult(String path, EtcdResult etcdResult) {
-
-		List<String> list = new ArrayList<String>();
-		if (etcdResult == null) {
-			return null;
-		}
-		EtcdNode childNode = etcdResult.node;
-		if (childNode != null) {
-			List<EtcdNode> nodes = childNode.nodes;
-			if (nodes != null) {
-				for (EtcdNode node : nodes) {
-					list.add(node.key.substring(path.length() + 1));
-				}
-			}
-
-		}
-		return list;
-
-	}
-
-	public List<String> getChildren(String path) throws EtcdClientException {
-		List<String> list = new ArrayList<String>();
-		EtcdResult children = get(path);
-		EtcdNode childNode = children.node;
-		if (childNode != null) {
-			List<EtcdNode> nodes = childNode.nodes;
-			if (nodes != null) {
-				for (EtcdNode node : nodes) {
-					list.add(node.key.substring(path.length() + 1));
-				}
-			}
-
-		}
-		return list;
 	}
 
 }

@@ -5,7 +5,7 @@ import java.net.URI;
 public class MainTest {
 
 	public static void main(String[] args) {
-		 String etcdServerURL = "http://127.0.0.1:4001/";
+	/*	 String etcdServerURL = "http://127.0.0.1:4001/";
 		JEtcdClient 	etcdClient = new JEtcdClient(URI.create(etcdServerURL));
 		String path = "/dubbo/com.sap.dubbo.demo.DemoService/providers/dubbo%3A%2F%2F10.59.184.73%3A20881%2Fcom.sap.dubbo.demo.DemoService";
 		try {
@@ -18,6 +18,6 @@ public class MainTest {
 			e.printStackTrace();
 		}
 	//	EtcdRegistry e=	new EtcdRegistry(new URL("http", "127.0.0.1", 4001));
-	}
-
+*/	
+		}
 }
