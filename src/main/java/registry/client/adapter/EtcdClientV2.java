@@ -1,4 +1,4 @@
-package com.alibaba.dubbo.remoting.etcd;
+package com.sap.sme.unicorn.rpc.duboo.registry.client.adapter;
 
 import java.net.URI;
 import java.util.ArrayList;
@@ -9,10 +9,10 @@ import java.util.concurrent.Executors;
 
 import com.alibaba.dubbo.common.URL;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.justinsb.etcd.EtcdClientException;
-import com.justinsb.etcd.EtcdNode;
-import com.justinsb.etcd.EtcdResult;
-import com.justinsb.etcd.JEtcdClient;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.etcd.EtcdClientException;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.etcd.EtcdNode;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.etcd.EtcdResult;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.etcd.JEtcdClient;
 
 public class EtcdClientV2 implements EtcdClient {
 	JEtcdClient client;
@@ -61,8 +61,6 @@ public class EtcdClientV2 implements EtcdClient {
 		return null;
 	}
 
-	
-	
 	private TargetChildListener createTargetChildListener(String path, final ChildListener listener) {
 		return new TargetChildListener() {
 			public void handleChildChange(String parentPath, List<String> currentChilds) throws Exception {
@@ -113,18 +111,20 @@ public class EtcdClientV2 implements EtcdClient {
 		return list;
 
 	}
-	
-	
-	
+
 	@Override
 	public void removeChildListener(String path, ChildListener childListener) {
-		
+
 	}
 
 	@Override
 	public boolean isAvailable() {
-		// TODO Auto-generated method stub
-		return false;
+		try {
+			client.set("isAvailable", "true", 5);
+		} catch (EtcdClientException e) {
+			return false;
+		}
+		return true;
 	}
 
 	@Override
@@ -137,8 +137,6 @@ public class EtcdClientV2 implements EtcdClient {
 		}
 
 	}
-
-
 
 	@Override
 	public List<String> getChildren(String path) {
@@ -159,10 +157,9 @@ public class EtcdClientV2 implements EtcdClient {
 		} catch (EtcdClientException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
-		}		
+		}
 		return list;
 	}
-
 
 	private void create(String path, boolean isDir) throws EtcdClientException {
 		int i = path.lastIndexOf('/');

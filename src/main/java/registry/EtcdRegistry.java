@@ -1,5 +1,5 @@
 
-package com.alibaba.dubbo.registry.etcd;
+package com.sap.sme.unicorn.rpc.duboo.registry;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,16 +9,17 @@ import java.util.concurrent.ConcurrentMap;
 
 import com.alibaba.dubbo.common.Constants;
 import com.alibaba.dubbo.common.URL;
-import com.alibaba.dubbo.common.logger.Logger;
-import com.alibaba.dubbo.common.logger.LoggerFactory;
 import com.alibaba.dubbo.common.utils.ConcurrentHashSet;
 import com.alibaba.dubbo.common.utils.UrlUtils;
 import com.alibaba.dubbo.registry.NotifyListener;
 import com.alibaba.dubbo.registry.support.FailbackRegistry;
-import com.alibaba.dubbo.remoting.etcd.ChildListener;
-import com.alibaba.dubbo.remoting.etcd.EtcdClient;
-import com.alibaba.dubbo.remoting.etcd.EtcdClientV2;
+
 import com.alibaba.dubbo.rpc.RpcException;
+import com.sap.sme.unicorn.frw.common.log.Logger;
+import com.sap.sme.unicorn.frw.common.log.LoggerFactory;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.adapter.ChildListener;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.adapter.EtcdClient;
+import com.sap.sme.unicorn.rpc.duboo.registry.client.adapter.EtcdClientV2;
 
 public class EtcdRegistry extends FailbackRegistry {
 
@@ -41,14 +42,8 @@ public class EtcdRegistry extends FailbackRegistry {
 	}
 
 	public boolean isAvailable() {
-		// need to improve
 		boolean isAvailable = false;
-		try {
-			isAvailable = etcdClient.isAvailable();
-		} catch (Throwable e) {
-			isAvailable = false;
-			e.printStackTrace();
-		}
+		isAvailable = etcdClient.isAvailable();
 		logger.info("isAvailable: " + isAvailable);
 		return isAvailable;
 	}
@@ -227,26 +222,5 @@ public class EtcdRegistry extends FailbackRegistry {
 		ChildListener childListener = childListeners.get(listener);
 		etcdClient.removeChildListener(toUrlPath(url), childListener);
 
-	}
-
-	public List<URL> lookup(URL url) {
-		logger.info("lookup: " + url);
-
-		if (url == null) {
-			throw new IllegalArgumentException("lookup url == null");
-		}
-		try {
-			List<String> providers = new ArrayList<String>();
-			for (String path : toCategoriesPath(url)) {
-				List<String> children = etcdClient.getChildren(path);
-				if (children != null) {
-					providers.addAll(children);
-				}
-			}
-			return toUrlsWithoutEmpty(url, providers);
-		} catch (Throwable e) {
-			throw new RpcException(
-					"Failed to lookup " + url + " from zookeeper " + getUrl() + ", cause: " + e.getMessage(), e);
-		}
 	}
 }
